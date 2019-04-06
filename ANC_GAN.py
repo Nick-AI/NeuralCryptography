@@ -150,8 +150,6 @@ class CryptoGAN:
 
             if ep % 100 == 0:  # for efficiency reasons, stopping criterium is only checked in intervals
                 if self._stop_check():
-                    import pdb
-                    pdb.set_trace()
                     self.ali.save_weights(self.model_dir + f'{self.name_add}ali_{ep}epochs_succs.mdl')
                     self.bob.save_weights(self.model_dir + f'{self.name_add}bob_{ep}epochs_succs.mdl')
                     self.eve.save_weights(self.model_dir + f'{self.name_add}eve_{ep}epochs_succs.mdl')
