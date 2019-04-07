@@ -1,6 +1,6 @@
 # NeuralCryptography
 
-##[Adversarial Neural Cryptography](https://arxiv.org/pdf/1610.06918.pdf) Implementation in Keras
+## [Adversarial Neural Cryptography](https://arxiv.org/pdf/1610.06918.pdf) Implementation in Keras
 
 ### Implementation Details:
   * Implemented in python3
