@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import keras.backend as K
+import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 from keras.models import Model
 from keras.optimizers import Adam
@@ -28,6 +29,11 @@ class CryptoGAN:
         self.eve = self._get_network(self.n_bits)
         self.eve.compile(loss=['mae'], optimizer=self.opt)
 
+        # Fix adversary's weights for full GAN
+        for l in self.eve.layers:
+            self.eve.get_layer(l.name).trainable = False
+        self.eve.trainable = False
+
         # a&b networks and full GAN
         self.ali = self._get_network(2*self.n_bits)
         self.bob = self._get_network(2*self.n_bits)
@@ -39,17 +45,14 @@ class CryptoGAN:
         reconst_b = self.bob(inp_b)
         reconst_e = self.eve(inp_e)
 
-        # Fix adversary's weights for full GAN
-        self.eve.trainable = False
-
         self.full_model = Model(inputs=[inp_a, inp_b, inp_e],
                                 outputs=[reconst_b, reconst_e])
         self.full_model.compile(optimizer=self.opt,
                                 loss=['mae', self._adversarial_loss_func])
 
-        # self.eve.summary()
-        # self.ali.summary()
-        # self.bob.summary()
+        self.eve.summary()
+        self.ali.summary()
+        self.bob.summary()
 
 
     # function defining network architecture
@@ -68,8 +71,10 @@ class CryptoGAN:
 
     # Custom loss function based on definition in paper
     def _adversarial_loss_func(self, y_true, y_pred):
-        rand_guess = K.variable(np.array([self.n_bits/2]))
-        return K.square(rand_guess - K.mean(K.abs(y_true - y_pred))) / K.square(rand_guess)
+        rand_guess = K.variable(self.n_bits/2)
+        loss = K.square(rand_guess - K.mean(K.abs(y_true - y_pred))) / K.square(rand_guess)
+        print(loss)
+        return loss
 
     # function to query for key/ plaintext values
     def _gen_bit_string(self):
@@ -85,7 +90,8 @@ class CryptoGAN:
             key_batch.append(self._gen_bit_string())
         pt_batch = np.array(pt_batch)
         key_batch = np.array(key_batch)
-        ct_batch = np.round(self.ali.predict(np.concatenate((pt_batch, key_batch), axis=1)))  # making it binary
+        # ct_batch = np.round(self.ali.predict(np.concatenate((pt_batch, key_batch), axis=1)))  # making it binary
+        ct_batch = self.ali.predict(np.concatenate((pt_batch, key_batch), axis=1))
         train_batch = np.array([pt_batch, key_batch, ct_batch])
         return train_batch
 
@@ -119,7 +125,21 @@ class CryptoGAN:
 
         return np.round(end_flag)
 
+    def _plt_losses(self, model_losses, ep):
+        model_losses = np.array(model_losses)
+        b_loss = model_losses[:, 1]
+        e_loss = model_losses[:, 2]
+        a_loss = model_losses[:, 0]
+        plt.plot(a_loss, label='Alice Loss')
+        plt.plot(e_loss[0:500], label='Eve Loss')
+        plt.plot(b_loss[0:500], color='gray', label='Bob Loss')
+        plt.legend()
+        plt.show()
+        plt.savefig(f'./figs/{self.name_add}_epoch{ep}.pdf')
+
+
     def train_full(self):
+        check_freq = 200
         ab_loss = []
         e_loss = []
         ep_batches = 3  # generate all batches needed for epoch at once, speeds up training
@@ -129,6 +149,7 @@ class CryptoGAN:
             # train encryption nets
             trn_batch = self._gen_train_data(ep_batches)
             for bidx in range(0, int(ep_batches/3)):
+
                 batch = trn_batch[:, bidx:(bidx+1)*self.batch_size, :]
                 pt_batch = batch[0, :, :]
                 key_batch = batch[1, :, :]
@@ -142,13 +163,19 @@ class CryptoGAN:
 
             # train attacker net (twice as many iterations as encryption nets)
             for bidx in range(int(ep_batches/3), ep_batches):
-                batch = trn_batch[:, (bidx)*self.batch_size:(bidx+1)*self.batch_size, :]
-                pt_batch = batch[0, :, :]
-                ct_batch = batch[2, :, :]
-                e_loss.append(self.eve.train_on_batch(x=ct_batch,
-                                                      y=pt_batch))
 
-            if ep % 100 == 0:  # for efficiency reasons, stopping criterium is only checked in intervals
+
+                for _ in range(100):  # test to see if eve is capable of overfitting
+                    batch = trn_batch[:, (bidx)*self.batch_size:(bidx+1)*self.batch_size, :]
+                    pt_batch = batch[0, :, :]
+                    ct_batch = batch[2, :, :]
+                    e_loss.append(self.eve.train_on_batch(x=ct_batch,
+                                                          y=pt_batch))
+
+            if ep % check_freq == 0:  # for efficiency reasons, stopping criterium is only checked in intervals
+                check_freq /= 2
+                if ep%200 == 0 and ep>0:
+                    self._plt_losses(ab_loss, ep)
                 if self._stop_check():
                     self.ali.save_weights(self.model_dir + f'{self.name_add}ali_{ep}epochs_succs.mdl')
                     self.bob.save_weights(self.model_dir + f'{self.name_add}bob_{ep}epochs_succs.mdl')
@@ -163,7 +190,7 @@ class CryptoGAN:
 
 if __name__ == '__main__':
     for i in range(10):
-        model = CryptoGAN(32, name_add=f'{i}_')
+        model = CryptoGAN(8, name_add=f'{i}_')
         model.train_full()
 
 
